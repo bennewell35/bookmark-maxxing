@@ -68,7 +68,11 @@ bookmark-maxxing/
   README.md
   AGENTS.md
   LICENSE
+  CODE_OF_CONDUCT.md
   CONTRIBUTING.md
+  GOVERNANCE.md
+  SECURITY.md
+  SUPPORT.md
   docs/
     framework.md
     quickstart.md
@@ -89,6 +93,16 @@ bookmark-maxxing/
   schemas/
     bookmark-item.schema.json
 ```
+
+## Community
+
+Before contributing, read:
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- [`GOVERNANCE.md`](GOVERNANCE.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`SUPPORT.md`](SUPPORT.md)
 
 ## Public Positioning
 
