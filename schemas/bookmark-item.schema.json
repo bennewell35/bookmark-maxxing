@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bookmark Maxxing Item",
+  "type": "object",
+  "required": ["source", "url", "captured_at", "title_or_text", "classification"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Where the bookmark came from, such as X, GitHub, Slack, newsletter, or browser."
+    },
+    "author": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "published_at": {
+      "type": "string"
+    },
+    "captured_at": {
+      "type": "string"
+    },
+    "title_or_text": {
+      "type": "string"
+    },
+    "linked_artifact": {
+      "type": "string"
+    },
+    "why_it_matters": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "converted_skill": {
+      "type": "string"
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["ignore", "note", "prompt", "workflow", "skill", "script"]
+    }
+  }
+}
