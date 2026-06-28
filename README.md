@@ -2,7 +2,74 @@
 
 Turn saved links into reusable skills.
 
-Most people collect bookmarks. Builders should be collecting skills.
+Most people collect bookmarks.
+
+Builders should be collecting skills.
+
+Bookmark Maxxing is a framework for learning from the people and projects you save, then converting that learning into reusable artifacts.
+
+Instead of letting saved links rot in a private pile, you use an AI coding agent or assistant to review them read-only, cluster the recurring ideas, attribute the sources, and extract what is worth turning into a skill, workflow, study guide, prompt, article, or small tool.
+
+**Bookmarks are the input. Learning is the process. Skills are the output.**
+
+## The Problem
+
+Bookmarks feel useful when you save them.
+
+Then they disappear.
+
+Your X bookmarks, GitHub stars, saved Slack posts, newsletters, docs, and read-later queue become a pile of good intentions. You collected signal, but you never converted it.
+
+Bookmark Maxxing solves the conversion problem:
+
+```text
+saved links -> recurring themes -> reusable skills
+```
+
+## Before / After
+
+Before:
+
+```text
+I saved 100 AI engineering posts and never looked at them again.
+```
+
+After:
+
+```text
+I turned 100 saved posts into:
+
+- 5 recurring themes
+- a source map
+- 5 reusable skills
+- a study guide
+- an article
+- a public framework others can reuse
+```
+
+Example:
+
+```text
+Theme: AI work is moving from prompts to operating loops.
+Skill: Design repeatable systems, not better prompts.
+```
+
+That is the core move: every interesting theme should become something reusable.
+
+## Who This Is For
+
+Bookmark Maxxing is for builders who save more than they can process:
+
+- engineers
+- founders
+- researchers
+- designers
+- operators
+- writers
+- students
+- open-source maintainers
+
+If you already save useful ideas, this gives you a way to turn those saved ideas into durable work.
 
 Bookmark Maxxing is an open-source framework for converting saved posts, articles, docs, repos, and notes into practical artifacts:
 
@@ -13,8 +80,6 @@ Bookmark Maxxing is an open-source framework for converting saved posts, article
 - operating principles
 - article drafts
 - small tools
-
-**Bookmarks are the input. Skills are the output.**
 
 ## Why
 
