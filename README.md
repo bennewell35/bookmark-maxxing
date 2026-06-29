@@ -115,6 +115,22 @@ Collect -> Extract -> Cluster -> Convert -> Publish -> Compound
 
 Read the full framework: [`docs/framework.md`](docs/framework.md)
 
+## Recipes
+
+Start with one source and one output.
+
+- [LinkedIn saved posts to skills](recipes/linkedin-saves-to-skills.md)
+
+## Adapters
+
+Adapters explain how to safely collect from specific sources.
+
+- [LinkedIn saved posts](docs/adapters/linkedin-saved-posts.md)
+
+## Roadmap
+
+See [`ROADMAP.md`](ROADMAP.md) for the small-slice project plan.
+
 ## Core Rule
 
 Every theme needs a skill.
@@ -139,9 +155,13 @@ bookmark-maxxing/
   SECURITY.md
   SUPPORT.md
   docs/
+    adapters/
+      linkedin-saved-posts.md
     framework.md
     quickstart.md
     publishing-playbook.md
+  recipes/
+    linkedin-saves-to-skills.md
   prompts/
     read-bookmarks.md
     extract-skills.md
