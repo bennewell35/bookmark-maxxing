@@ -56,6 +56,38 @@ Skill: Design repeatable systems, not better prompts.
 
 That is the core move: every interesting theme should become something reusable.
 
+## 30-Second Example
+
+Input:
+
+```text
+10 saved posts about agent memory, context rot, and instruction files.
+```
+
+Bookmark Maxxing output:
+
+| Extracted Pattern | Reusable Skill |
+|---|---|
+| Memory files rot when every lesson gets stored forever. | Cut memory down to durable rules that earn their place. |
+| Repeated lessons are more useful in shared docs, tests, or runbooks. | Convert anything you do twice into a reusable skill. |
+| Context should be pulled when needed, not pushed into every session. | Separate always-on instructions from searchable reference material. |
+
+Final artifact:
+
+```text
+Skill: Convert repeated lessons into docs, tests, skills, or runbooks.
+
+Trigger: The same lesson appears in more than one saved link or work session.
+
+Workflow:
+1. Name the repeated lesson.
+2. Decide where future work will look first.
+3. Add the lesson there.
+4. Remove duplicate or stale memory.
+
+Proof gate: A future session can find the rule without relying on hidden memory.
+```
+
 ## Who This Is For
 
 Bookmark Maxxing is for builders who save more than they can process:
