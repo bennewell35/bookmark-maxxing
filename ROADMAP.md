@@ -53,8 +53,16 @@ Deliverables:
 - `docs/x-mcp-integration.md`
 - `docs/specs/x-mcp-bookmark-ingestion.md`
 - `src/bookmark_maxxing/x_mcp.py`
+- `src/bookmark_maxxing/cli.py`
 - `.env.example`
-- pure local tests for normalization, metadata validation, and Markdown formatting
+- pure local tests for normalization, metadata validation, pagination, rate-limit handling, deduplication, and Markdown/JSON formatting
+
+Current status:
+
+- read-only client boundary added
+- fixture-backed dry-run ingestion added
+- no live X MCP/API transport yet
+- no mutation methods are exposed or accepted by the ingestion pipeline
 
 MVP capabilities:
 

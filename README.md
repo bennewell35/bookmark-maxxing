@@ -200,9 +200,13 @@ bookmark-maxxing/
     linkedin-saves-to-skills.md
   src/
     bookmark_maxxing/
+      cli.py
       x_mcp.py
   tests/
+    fixtures/
+      x_bookmarks_pages.json
     test_x_mcp.py
+  pyproject.toml
   prompts/
     read-bookmarks.md
     extract-skills.md
