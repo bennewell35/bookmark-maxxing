@@ -38,6 +38,42 @@ Deliverables:
 - `recipes/github-stars-to-skills.md`
 - optional export script after the recipe is proven
 
+## Slice 2A: X MCP Bookmark Ingestion
+
+Goal: use X MCP/API access to ingest X bookmarks, normalize source metadata, preserve attribution, and generate learning artifacts.
+
+Why:
+
+- X bookmarks were the original source for Bookmark Maxxing
+- X now exposes hosted MCP entry points for API and developer docs
+- bookmark ingestion is directly aligned with the framework thesis
+
+Deliverables:
+
+- `docs/x-mcp-integration.md`
+- `docs/specs/x-mcp-bookmark-ingestion.md`
+- `src/bookmark_maxxing/x_mcp.py`
+- `.env.example`
+- pure local tests for normalization, metadata validation, and Markdown formatting
+
+MVP capabilities:
+
+- X bookmark ingestion
+- bookmark metadata normalization
+- source attribution
+- theme clustering
+- Markdown summaries
+- study guide generation
+- reusable skill docs
+
+Future capabilities:
+
+- GitHub stars ingestion
+- saved article ingestion
+- learning graph
+- memory integration
+- export to Markdown, Notion, and GitHub
+
 ## Slice 3: Browser Bookmarks
 
 Goal: support exported browser bookmarks without requiring any account access.

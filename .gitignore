@@ -4,8 +4,11 @@ dist/
 build/
 .env
 .env.*
+!.env.example
 *.log
 tmp/
 work/
 raw/
 exports/private/
+__pycache__/
+*.pyc
