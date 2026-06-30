@@ -253,15 +253,30 @@ bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills > /tmp/ext
 
 Prompts: `extract-skills` (default), `read-bookmarks`, `write-article`.
 
-Add `--llm` to actually run the prompt through a local open-source model and get real themes/skills back. It speaks the OpenAI-compatible `/chat/completions` API (stdlib only, no extra deps), defaulting to a local **[Ollama](https://ollama.com)** server:
+Add `--llm` to actually run the prompt through a local open-source model and get real themes/skills back. It speaks the OpenAI-compatible `/chat/completions` API (stdlib only, no extra deps), defaulting to a local **[Ollama](https://ollama.com)** server.
+
+**Reproducible local model (recommended) — `make model`.** A pinned model is defined in [`Modelfile`](Modelfile) and served by the [`docker-compose.yml`](docker-compose.yml) Ollama service. No model weights are committed to git; the small base model is downloaded into a Docker volume on first build.
 
 ```bash
-# one-time: install Ollama and pull a small open model
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1            # or qwen2.5, llama3.2, etc.
+make model        # starts the Ollama container + builds the pinned `bookmark-maxxing` model
+make demo         # ingest the fixture -> LLM skills via the pinned model
+make summaries    # ingest the fixture -> LLM bookmark summaries
+make model-down   # stop the container
+```
+
+Or drive it yourself (any OpenAI-compatible server works):
+
+```bash
+# alternative: install Ollama directly instead of Docker
+curl -fsSL https://ollama.com/install.sh | sh && ollama pull llama3.2:1b
 
 bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills --llm > /tmp/skills.md
 ```
+
+See committed sample outputs under [`examples/`](examples/): the saved-bookmark source map
+([`source-map.sample.md`](examples/source-map.sample.md)) + JSON, LLM summaries
+([`summaries.sample.md`](examples/summaries.sample.md)), and LLM skills
+([`skills.sample.md`](examples/skills.sample.md)).
 
 `extract` notes:
 
