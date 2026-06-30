@@ -1,0 +1,22 @@
+# Local, free, OpenAI-compatible LLM for `bookmark-maxxing extract --llm`.
+# Brings up an Ollama server and (via `make model`) builds the pinned
+# `bookmark-maxxing` model from ./Modelfile. No model weights live in git;
+# Ollama downloads the small base model on first build into the named volume.
+services:
+  ollama:
+    image: ollama/ollama:0.30.11
+    container_name: bookmark-maxxing-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+      - ./Modelfile:/Modelfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  ollama-models:

@@ -62,8 +62,8 @@ Current status:
 - read-only client boundary added
 - fixture-backed dry-run ingestion added
 - direct read-only X API transport added behind explicit live configuration
-- no MCP-native transport yet
-- no mutation methods are exposed or accepted by the ingestion pipeline
+- official X MCP-native transport added (`XMCPBookmarkClient` via the `xurl mcp` bridge), with an offline fixture-backed demo and a clean error path when xurl/auth is unavailable
+- no mutation methods or mutation MCP tools are exposed or accepted by the ingestion pipeline
 
 MVP capabilities:
 

@@ -143,10 +143,20 @@ Bookmark Maxxing ships a small, read-only CLI that normalizes X bookmarks into a
 
 ### What it does
 
-- Reads X-shaped bookmark records (from a local fixture, or an opt-in read-only live fetch).
+- Reads X-shaped bookmark records through one of three read-only paths.
 - Normalizes them into a consistent shape, preserving author and source attribution.
 - Validates and deduplicates them.
 - Emits a deterministic Markdown source map or JSON document you can feed into the framework prompts.
+
+### Three read-only ingestion paths
+
+| Path | Flag | Network | Auth | When to use |
+|---|---|---|---|---|
+| Fixture dry-run | `--dry-run --input <file>` (default) | none | none | Safe demo, tests, CI |
+| Direct X API v2 | `--live` | `GET /2/users/{id}/bookmarks` | `X_API_USER_ID` + `X_API_BEARER_TOKEN` | A bearer token, no MCP tooling |
+| Official X MCP | `--mcp` | `xurl mcp` → `https://api.x.com/mcp` | xurl OAuth (`xurl auth oauth2`) | The hosted X MCP server |
+
+All three are strictly read-only: only a bookmarks **list** operation is ever invoked, and any mutation method/tool is rejected.
 
 ### Install locally
 
@@ -200,7 +210,80 @@ Live mode rules:
 - Output may contain **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
 - Do not commit generated output. `.gitignore` already excludes `.env`, `tmp/`, `raw/`, and `exports/private/`.
 
+### Optional: official X MCP mode
+
+`--mcp` ingests bookmarks through the official hosted **X MCP server** (`https://api.x.com/mcp`), reached via the open-source [`xurl mcp`](https://github.com/xdevplatform/xurl) bridge. It invokes only a read-only bookmarks **list** tool and refuses any mutating tool, so it cannot add, remove, or change bookmarks.
+
+Try it fully offline first — replay a recorded MCP response with no network or credentials:
+
+```bash
+bookmark-maxxing ingest-x --mcp --input tests/fixtures/x_mcp_bookmarks.json --format json
+```
+
+Live MCP fetch (opt-in, read-only) needs xurl installed and authenticated once:
+
+```bash
+# one-time: install xurl and log in (OAuth2)
+npm install -g @xdevplatform/xurl      # or: brew install --cask xdevplatform/tap/xurl
+xurl auth oauth2                       # add --headless on a remote box
+
+export X_API_USER_ID=...               # your numeric X user ID
+bookmark-maxxing ingest-x --mcp --format json --max-pages 1 > /tmp/my-bookmarks.json
+```
+
+MCP mode notes:
+
+- The bridge command defaults to `xurl mcp https://api.x.com/mcp`; override with `X_MCP_BRIDGE_COMMAND` (e.g. to use `npx -y @xdevplatform/xurl mcp ...`).
+- X does not publish a stable tool name for the bookmarks list operation. The default is `get_users_id_bookmarks`; override with `X_MCP_BOOKMARKS_TOOL` (discover names via the bridge's `tools/list`).
+- If xurl is missing or unauthenticated, `--mcp` exits cleanly with a clear message and makes no partial calls.
+- Output may contain **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
+
 See [`docs/live-smoke-test.md`](docs/live-smoke-test.md) for a safe live read-only smoke test, and [`docs/x-mcp-integration.md`](docs/x-mcp-integration.md) for the full integration reference.
+
+### Turn bookmarks into skills: `extract`
+
+`ingest-x` produces a normalized **source map** (it does not invent themes or summaries). `bookmark-maxxing extract` is the next step: it takes that ingested JSON and runs one of the framework prompts (`prompts/`) against it, injecting your bookmarks (source-map table + structured JSON) into the prompt.
+
+By default it is **compose-only** — it emits a complete, copy-paste-ready prompt for any LLM/agent and calls no model:
+
+```bash
+bookmark-maxxing ingest-x --mcp --input tests/fixtures/x_mcp_bookmarks.json --format json > /tmp/bm.json
+bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills > /tmp/extract-skills.prompt.md
+```
+
+Prompts: `extract-skills` (default), `read-bookmarks`, `write-article`.
+
+Add `--llm` to actually run the prompt through a local open-source model and get real themes/skills back. It speaks the OpenAI-compatible `/chat/completions` API (stdlib only, no extra deps), defaulting to a local **[Ollama](https://ollama.com)** server.
+
+**Reproducible local model (recommended) — `make model`.** A pinned model is defined in [`Modelfile`](Modelfile) and served by the [`docker-compose.yml`](docker-compose.yml) Ollama service. No model weights are committed to git; the small base model is downloaded into a Docker volume on first build.
+
+```bash
+make model        # starts the Ollama container + builds the pinned `bookmark-maxxing` model
+make demo         # ingest the fixture -> LLM skills via the pinned model
+make summaries    # ingest the fixture -> LLM bookmark summaries
+make model-down   # stop the container
+```
+
+Or drive it yourself (any OpenAI-compatible server works):
+
+```bash
+# alternative: install Ollama directly instead of Docker
+curl -fsSL https://ollama.com/install.sh | sh && ollama pull llama3.2:1b
+
+bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills --llm > /tmp/skills.md
+```
+
+See committed sample outputs under [`examples/`](examples/): the saved-bookmark source map
+([`source-map.sample.md`](examples/source-map.sample.md)) + JSON, LLM summaries
+([`summaries.sample.md`](examples/summaries.sample.md)), and LLM skills
+([`skills.sample.md`](examples/skills.sample.md)).
+
+`extract` notes:
+
+- Point it at any OpenAI-compatible server (llama.cpp, vLLM, LM Studio, OpenRouter) via `BOOKMARK_MAXXING_LLM_BASE_URL` + `BOOKMARK_MAXXING_LLM_MODEL` (and `BOOKMARK_MAXXING_LLM_API_KEY` for hosted ones); override the model inline with `--llm-model`.
+- If no LLM server is reachable, `--llm` exits cleanly with a clear message and emits nothing — it never fakes output.
+- The model only *reads* your already-ingested bookmarks; `extract` makes no calls to X and cannot mutate any source platform.
+- LLM output may reflect **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
 
 ## The Framework
 
@@ -275,6 +358,7 @@ bookmark-maxxing/
   tests/
     fixtures/
       x_bookmarks_pages.json
+      x_mcp_bookmarks.json
     test_x_mcp.py
   pyproject.toml
   prompts/
@@ -334,6 +418,6 @@ The current useful version is:
 - templates
 - weekly examples
 - source attribution
-- a read-only X bookmark CLI (fixture dry-run by default, opt-in live mode)
+- a read-only X bookmark CLI with three paths: fixture dry-run (default), direct X API v2, and official X MCP
 
 The next layers extend the CLI to normalize exports from GitHub, Slack, newsletters, and browser bookmarks. See [`docs/release-checklist.md`](docs/release-checklist.md) for what remains before the v0.1.0 release.

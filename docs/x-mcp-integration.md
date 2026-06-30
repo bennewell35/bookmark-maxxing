@@ -14,7 +14,33 @@ The X developer docs MCP endpoint is:
 https://docs.x.com/mcp
 ```
 
-This repository does not call either endpoint by default. The current implementation is a read-only client boundary, fixture-backed ingestion pipeline, explicit direct X API transport, and dry-run CLI for configuration, pagination, rate-limit handling, normalization, validation, deduplication, and Markdown/JSON output.
+This repository does not call either endpoint by default. The implementation provides three read-only ingestion paths behind one client boundary: a fixture-backed dry-run, an explicit direct X API v2 transport, and an official **X MCP** transport that talks to `https://api.x.com/mcp` through the `xurl mcp` bridge. All paths share the same normalization, validation, deduplication, pagination, rate-limit handling, and Markdown/JSON output.
+
+## Three Read-Only Paths
+
+| Path | CLI | Transport | Auth |
+|---|---|---|---|
+| Fixture dry-run | `ingest-x --dry-run --input <file>` | local JSON, no network | none |
+| Direct X API v2 | `ingest-x --live` | `GET /2/users/{id}/bookmarks` | `X_API_USER_ID` + `X_API_BEARER_TOKEN` |
+| Official X MCP | `ingest-x --mcp` | `xurl mcp` → `https://api.x.com/mcp` | xurl OAuth (`xurl auth oauth2`) |
+
+The MCP path is implemented by `XMCPBookmarkClient`, which calls a single read-only bookmarks list tool through an `MCPToolCaller`. In production the caller is `StdioMCPBridge` (a newline-delimited JSON-RPC bridge over `xurl mcp`); tests and the offline demo use `InMemoryMCPToolCaller` to replay recorded `tools/call` results. The client refuses any tool name that implies mutation (`add`, `remove`, `delete`, `like`, `repost`, `follow`, `create`, …) and exposes no mutation methods.
+
+### Official X MCP usage
+
+```bash
+# Offline demo (no network, no credentials):
+bookmark-maxxing ingest-x --mcp --input tests/fixtures/x_mcp_bookmarks.json --format json
+
+# Live read-only via xurl (one-time `xurl auth oauth2` first):
+export X_API_USER_ID=123456
+bookmark-maxxing ingest-x --mcp --format json --max-pages 1 > /tmp/bookmarks.json
+```
+
+Configuration:
+
+- `X_MCP_BRIDGE_COMMAND` — overrides the bridge command (default `xurl mcp https://api.x.com/mcp`).
+- `X_MCP_BOOKMARKS_TOOL` — overrides the read-only bookmarks tool name (default `get_users_id_bookmarks`; discover via `tools/list`).
 
 ## What It Enables
 
@@ -232,6 +258,8 @@ The current scaffold includes:
 - JSON output formatting
 - dry-run CLI backed by local fixtures
 - explicit live CLI path guarded by env configuration
+- official X MCP transport (`XMCPBookmarkClient`) via the `xurl mcp` stdio bridge
+- offline MCP demo + tests backed by recorded `tools/call` fixtures
 
 See:
 
@@ -239,22 +267,31 @@ See:
 - `src/bookmark_maxxing/cli.py`
 - `tests/test_x_mcp.py`
 - `tests/fixtures/x_bookmarks_pages.json`
+- `tests/fixtures/x_mcp_bookmarks.json`
 - `docs/specs/x-mcp-bookmark-ingestion.md`
 
 ## Known Limitations
 
-- Direct X API transport is implemented, but MCP-native transport is still future work.
+- The MCP bookmarks tool name is configurable (`X_MCP_BOOKMARKS_TOOL`) because X does not publish a stable name; the default may need adjustment, discoverable via `tools/list`.
+- Live MCP mode requires `xurl` to be installed and authenticated once (`xurl auth oauth2`).
 - Fixture payloads are intentionally small and public-safe.
-- Theme clustering and study-guide generation still happen through the framework prompts, not this client boundary.
+- The ingestion client is a normalizer: it emits a source map and does not invent themes or summaries. Theme clustering, summaries, and skill/article generation run through the framework prompts via `bookmark-maxxing extract` (compose-only by default, `--llm` to run a local OpenAI-compatible model such as Ollama).
 - Auth validation only checks that local configuration exists; it does not verify credentials.
 - Rate-limit handling currently stops on `429` and preserves parsed header metadata for callers.
 
 ## Future Roadmap
 
+Delivered:
+
 - live X bookmark ingestion through configured read-only API transport
-- MCP-native transport support
+- official X MCP-native transport (`XMCPBookmarkClient` via `xurl mcp`)
 - pagination and rate-limit handling
 - bookmark deduplication
+- prompt-driven extraction (`bookmark-maxxing extract`): composes framework prompts from ingested bookmarks and optionally runs them through a local OSS LLM (`--llm`, OpenAI-compatible/Ollama) to produce themes, skills, and articles
+
+Planned:
+
+- bookmark-folder-aware read-only listing
 - theme clustering
 - source attribution scoring
 - study guide generation
@@ -264,16 +301,16 @@ See:
 - memory integration
 - export to Markdown, Notion, and GitHub
 
-## Next MCP-Native Slice
+## MCP-Native Transport (delivered)
 
-The next implementation slice should add an MCP-native transport class behind `XReadOnlyBookmarkClient` that:
+`XMCPBookmarkClient` is an MCP-native transport behind `XReadOnlyBookmarkClient` that:
 
-- reads credentials from environment variables only
+- reads configuration (bridge command, tool name) from environment variables only
 - fetches authenticated-user bookmarks without mutating account state
-- maps live MCP/API responses into `XBookmarkPage`
-- preserves pagination tokens and rate-limit headers
+- maps MCP `tools/call` results into `XBookmarkPage`
+- preserves pagination tokens across pages
 - records no raw private bookmark exports in the repo
-- adds tests with recorded synthetic fixtures, not live X calls
+- is covered by tests with recorded synthetic MCP fixtures, not live X calls
 
 ## References
 

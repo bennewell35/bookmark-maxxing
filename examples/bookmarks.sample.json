@@ -1,0 +1,47 @@
+{
+  "bookmarks": [
+    {
+      "author_name": "Ben (AI eng)",
+      "author_username": "ben_ai_eng",
+      "captured_at": null,
+      "created_at": "2026-06-28T16:41:08Z",
+      "linked_urls": [
+        "https://example.com/bookmark-maxxing"
+      ],
+      "post_id": "1",
+      "source": "x",
+      "source_url": "https://x.com/ben_ai_eng/status/1",
+      "text": "Bookmarks are the input. Skills are the output.",
+      "theme": null
+    },
+    {
+      "author_name": "Systems Builder",
+      "author_username": "systems_builder",
+      "captured_at": null,
+      "created_at": "2026-06-27T10:00:00Z",
+      "linked_urls": [],
+      "post_id": "2",
+      "source": "x",
+      "source_url": "https://x.com/systems_builder/status/2",
+      "text": "Design repeatable systems, not better prompts.",
+      "theme": null
+    },
+    {
+      "author_name": "Source Mapper",
+      "author_username": "source_mapper",
+      "captured_at": null,
+      "created_at": "2026-06-26T09:30:00Z",
+      "linked_urls": [],
+      "post_id": "3",
+      "source": "x",
+      "source_url": "https://x.com/source_mapper/status/3",
+      "text": "Source maps make learning artifacts auditable.",
+      "theme": null
+    }
+  ],
+  "duplicates_removed": 0,
+  "next_token": null,
+  "pages_fetched": 2,
+  "truncated": false,
+  "validation_errors": []
+}
