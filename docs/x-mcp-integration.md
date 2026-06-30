@@ -14,7 +14,7 @@ The X developer docs MCP endpoint is:
 https://docs.x.com/mcp
 ```
 
-This repository does not call either endpoint by default. The current implementation is a read-only client boundary, fixture-backed ingestion pipeline, and dry-run CLI for configuration, pagination, rate-limit handling, normalization, validation, deduplication, and Markdown/JSON output.
+This repository does not call either endpoint by default. The current implementation is a read-only client boundary, fixture-backed ingestion pipeline, explicit direct X API transport, and dry-run CLI for configuration, pagination, rate-limit handling, normalization, validation, deduplication, and Markdown/JSON output.
 
 ## What It Enables
 
@@ -107,6 +107,7 @@ The project should read configuration from environment variables only.
 ```text
 X_MCP_SERVER_URL=https://api.x.com/mcp
 X_DOCS_MCP_SERVER_URL=https://docs.x.com/mcp
+X_API_BASE_URL=https://api.x.com/2
 X_API_USER_ID=
 X_API_BEARER_TOKEN=
 X_API_CLIENT_ID=
@@ -149,7 +150,7 @@ XReadOnlyBookmarkClient.fetch_bookmarks_page(request)
 
 The ingestion pipeline rejects clients that expose obvious mutation methods such as `like`, `reply`, `repost`, `follow`, `unfollow`, `delete`, or `unbookmark`.
 
-Tests and the CLI use `InMemoryXBookmarkClient`, which reads local JSON fixtures only. There is no live HTTP, MCP, browser, cookie, or credential transport in the repo yet.
+Tests use synthetic clients and fixtures only. The default CLI path uses `InMemoryXBookmarkClient`, which reads local JSON fixtures. The explicit live path uses `XAPIReadOnlyBookmarkClient`, which issues authenticated `GET /2/users/{id}/bookmarks` requests and maps responses into local page objects. There is no browser, cookie, scraping, account mutation, or write method in the transport.
 
 ## Local Setup
 
@@ -166,7 +167,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 ## Dry-Run Usage
 
-The first runnable path is fixture-backed and local-only.
+The default runnable path is fixture-backed and local-only.
 
 ```bash
 PYTHONPATH=src python3 -m bookmark_maxxing.cli ingest-x \
@@ -190,6 +191,29 @@ After installing the package locally, the same command is exposed as:
 bookmark-maxxing ingest-x --dry-run --input tests/fixtures/x_bookmarks_pages.json
 ```
 
+## Explicit Live Read-Only Usage
+
+Live fetching is opt-in. It requires an X user ID and a user-context bearer token stored locally in environment variables. Do not commit `.env`.
+
+```bash
+export X_API_USER_ID=123456
+export X_API_BEARER_TOKEN=...
+
+PYTHONPATH=src python3 -m bookmark_maxxing.cli ingest-x \
+  --live \
+  --format json \
+  --max-pages 1
+```
+
+The live transport:
+
+- uses only HTTP `GET`
+- calls `/2/users/{id}/bookmarks`
+- passes `max_results` and `pagination_token`
+- parses `meta.next_token`
+- preserves `x-rate-limit-*` and `retry-after` metadata
+- returns normalized local objects through the same ingestion pipeline
+
 ## Current Scaffold
 
 The current scaffold includes:
@@ -197,6 +221,7 @@ The current scaffold includes:
 - config loading from environment variables
 - auth configuration validation
 - read-only client protocol
+- direct read-only X API transport
 - request and response types
 - pagination abstraction
 - rate-limit metadata parsing
@@ -206,7 +231,7 @@ The current scaffold includes:
 - Markdown source map formatting
 - JSON output formatting
 - dry-run CLI backed by local fixtures
-- TODO boundary for live X MCP/API fetching
+- explicit live CLI path guarded by env configuration
 
 See:
 
@@ -218,7 +243,7 @@ See:
 
 ## Known Limitations
 
-- No live X MCP/API transport is implemented.
+- Direct X API transport is implemented, but MCP-native transport is still future work.
 - Fixture payloads are intentionally small and public-safe.
 - Theme clustering and study-guide generation still happen through the framework prompts, not this client boundary.
 - Auth validation only checks that local configuration exists; it does not verify credentials.
@@ -226,7 +251,8 @@ See:
 
 ## Future Roadmap
 
-- live X bookmark ingestion through a configured read-only MCP/API transport
+- live X bookmark ingestion through configured read-only API transport
+- MCP-native transport support
 - pagination and rate-limit handling
 - bookmark deduplication
 - theme clustering
@@ -238,9 +264,9 @@ See:
 - memory integration
 - export to Markdown, Notion, and GitHub
 
-## Next Live-Auth Slice
+## Next MCP-Native Slice
 
-The next implementation slice should add a transport class behind `XReadOnlyBookmarkClient` that:
+The next implementation slice should add an MCP-native transport class behind `XReadOnlyBookmarkClient` that:
 
 - reads credentials from environment variables only
 - fetches authenticated-user bookmarks without mutating account state

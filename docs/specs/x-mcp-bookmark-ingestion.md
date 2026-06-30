@@ -69,6 +69,7 @@ Future outputs:
 ```text
 X_MCP_SERVER_URL=https://api.x.com/mcp
 X_DOCS_MCP_SERVER_URL=https://docs.x.com/mcp
+X_API_BASE_URL=https://api.x.com/2
 X_API_USER_ID=
 X_API_BEARER_TOKEN=
 X_API_CLIENT_ID=
@@ -88,3 +89,4 @@ REDIRECT_URI=http://localhost:8080/callback
 - Live API integration remains behind explicit TODOs/configuration.
 - Dry-run CLI reads only local fixture files.
 - Ingestion rejects clients that expose obvious account mutation methods.
+- Direct live API transport uses only authenticated GET requests.

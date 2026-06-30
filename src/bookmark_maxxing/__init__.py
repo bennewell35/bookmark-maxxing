@@ -5,6 +5,8 @@ from .x_mcp import (
     InMemoryXBookmarkClient,
     NormalizedBookmark,
     RateLimitInfo,
+    XAPIReadOnlyBookmarkClient,
+    X_API_DEFAULT_BASE_URL,
     XAuthConfigurationError,
     XBookmarkIngestionResult,
     XBookmarkPage,
@@ -24,6 +26,7 @@ from .x_mcp import (
     load_x_mcp_config,
     normalize_x_bookmark,
     validate_bookmark,
+    validate_x_api_transport_config,
     validate_x_auth_config,
 )
 
@@ -32,6 +35,8 @@ __all__ = [
     "InMemoryXBookmarkClient",
     "NormalizedBookmark",
     "RateLimitInfo",
+    "XAPIReadOnlyBookmarkClient",
+    "X_API_DEFAULT_BASE_URL",
     "XAuthConfigurationError",
     "XBookmarkIngestionResult",
     "XBookmarkPage",
@@ -51,5 +56,6 @@ __all__ = [
     "load_x_mcp_config",
     "normalize_x_bookmark",
     "validate_bookmark",
+    "validate_x_api_transport_config",
     "validate_x_auth_config",
 ]

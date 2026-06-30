@@ -10,10 +10,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from os import environ
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 X_MCP_DEFAULT_URL = "https://api.x.com/mcp"
 X_DOCS_MCP_DEFAULT_URL = "https://docs.x.com/mcp"
+X_API_DEFAULT_BASE_URL = "https://api.x.com/2"
 DEFAULT_PAGE_SIZE = 100
 READ_ONLY_CLIENT_METHODS = frozenset({"fetch_bookmarks_page"})
 MUTATING_CLIENT_METHOD_NAMES = frozenset(
@@ -64,6 +68,7 @@ class XMCPLocalConfig:
 
     mcp_server_url: str = X_MCP_DEFAULT_URL
     docs_mcp_server_url: str = X_DOCS_MCP_DEFAULT_URL
+    api_base_url: str = X_API_DEFAULT_BASE_URL
     user_id: str | None = None
     bearer_token: str | None = None
     client_id: str | None = None
@@ -185,6 +190,67 @@ class InMemoryXBookmarkClient:
         return self.pages[page_index]
 
 
+@dataclass(frozen=True)
+class XAPIReadOnlyBookmarkClient:
+    """Read-only X API transport for authenticated-user bookmarks.
+
+    This class only issues GET requests. Tests inject a fake opener; production
+    use must pass credentials through environment-backed config.
+    """
+
+    config: XMCPLocalConfig
+    timeout_seconds: float = 30.0
+    opener: Any = None
+
+    def __post_init__(self) -> None:
+        validate_x_api_transport_config(self.config, require_user_id=False)
+
+    def fetch_bookmarks_page(self, request: XBookmarkRequest) -> XBookmarkPage:
+        user_id = request.user_id or self.config.user_id
+        if user_id is None:
+            raise XAuthConfigurationError("X_API_USER_ID is required for live bookmark fetches.")
+
+        url = self._bookmarks_url(user_id, request)
+        http_request = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.config.bearer_token}",
+                "User-Agent": "bookmark-maxxing-readonly/0.1",
+            },
+            method="GET",
+        )
+
+        try:
+            response = self._open(http_request)
+            return _page_from_x_api_response(response)
+        except HTTPError as error:
+            if error.code == 429:
+                return XBookmarkPage(
+                    items=(),
+                    rate_limit=RateLimitInfo.from_headers(error.headers),
+                    status_code=429,
+                )
+            raise XBookmarkPayloadError(f"X API returned HTTP {error.code}") from error
+
+    def _open(self, request: Request) -> Any:
+        if self.opener is not None:
+            return self.opener.open(request, timeout=self.timeout_seconds)
+        return urlopen(request, timeout=self.timeout_seconds)
+
+    def _bookmarks_url(self, user_id: str, request: XBookmarkRequest) -> str:
+        query = {
+            "expansions": "author_id",
+            "max_results": str(_clamp_page_size(request.max_results)),
+            "tweet.fields": "author_id,created_at,entities,public_metrics",
+            "user.fields": "name,username",
+        }
+        if request.pagination_token:
+            query["pagination_token"] = request.pagination_token
+        base_url = self.config.api_base_url.rstrip("/")
+        return f"{base_url}/users/{user_id}/bookmarks?{urlencode(query)}"
+
+
 def load_x_mcp_config(env: Mapping[str, str] | None = None) -> XMCPLocalConfig:
     """Load local X MCP/API configuration from environment variables."""
 
@@ -192,6 +258,7 @@ def load_x_mcp_config(env: Mapping[str, str] | None = None) -> XMCPLocalConfig:
     return XMCPLocalConfig(
         mcp_server_url=values.get("X_MCP_SERVER_URL", X_MCP_DEFAULT_URL),
         docs_mcp_server_url=values.get("X_DOCS_MCP_SERVER_URL", X_DOCS_MCP_DEFAULT_URL),
+        api_base_url=values.get("X_API_BASE_URL", X_API_DEFAULT_BASE_URL),
         user_id=_empty_to_none(values.get("X_API_USER_ID")),
         bearer_token=_empty_to_none(values.get("X_API_BEARER_TOKEN")),
         client_id=_empty_to_none(values.get("X_API_CLIENT_ID")),
@@ -216,6 +283,21 @@ def validate_x_auth_config(config: XMCPLocalConfig) -> None:
     raise XAuthConfigurationError(
         "Missing X auth configuration. Set a bearer token or OAuth client credentials locally."
     )
+
+
+def validate_x_api_transport_config(
+    config: XMCPLocalConfig,
+    *,
+    require_user_id: bool = True,
+) -> None:
+    """Validate direct read-only X API transport configuration."""
+
+    if require_user_id and config.user_id is None:
+        raise XAuthConfigurationError("X_API_USER_ID is required for live bookmark fetches.")
+    if config.bearer_token is None:
+        raise XAuthConfigurationError(
+            "X_API_BEARER_TOKEN is required for direct read-only X API bookmark fetches."
+        )
 
 
 def assert_read_only_client(client: object) -> None:
@@ -511,6 +593,92 @@ def _page_from_mapping(page: Any) -> XBookmarkPage:
     )
 
 
+def _page_from_x_api_response(response: Any) -> XBookmarkPage:
+    status_code = _response_status_code(response)
+    headers = _response_headers(response)
+    raw_body = response.read()
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (AttributeError, json.JSONDecodeError) as error:
+        raise XBookmarkPayloadError("X API response body was not valid JSON") from error
+    return _page_from_x_api_payload(payload, headers, status_code)
+
+
+def _page_from_x_api_payload(
+    payload: Any,
+    headers: Mapping[str, Any] | None = None,
+    status_code: int = 200,
+) -> XBookmarkPage:
+    if not isinstance(payload, Mapping):
+        raise XBookmarkPayloadError("X API payload must be an object")
+
+    data = payload.get("data") or []
+    if not isinstance(data, list):
+        raise XBookmarkPayloadError("X API payload data must be a list")
+
+    users_by_id = _users_by_id(payload.get("includes"))
+    items = tuple(_tweet_to_raw_bookmark(tweet, users_by_id) for tweet in data)
+    metadata = _mapping(payload.get("meta"))
+    return XBookmarkPage(
+        items=items,
+        next_token=_optional_text(metadata.get("next_token")),
+        rate_limit=RateLimitInfo.from_headers(headers),
+        status_code=status_code,
+    )
+
+
+def _tweet_to_raw_bookmark(
+    tweet: Any,
+    users_by_id: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    if not isinstance(tweet, Mapping):
+        raise XBookmarkPayloadError("X API tweet item must be an object")
+
+    author = users_by_id.get(_first_text(tweet.get("author_id")), {})
+    username = _first_text(author.get("username"), tweet.get("author_username"))
+    post_id = _first_text(tweet.get("id"))
+    source_url = f"https://x.com/{username}/status/{post_id}" if username and post_id else ""
+    return {
+        "author": {
+            "name": _first_text(author.get("name"), username),
+            "username": username,
+        },
+        "created_at": _optional_text(tweet.get("created_at")),
+        "id": post_id,
+        "linked_urls": _extract_linked_urls(_mapping(tweet.get("entities")).get("urls") or ()),
+        "source_url": source_url,
+        "text": _first_text(tweet.get("text")),
+    }
+
+
+def _users_by_id(includes: Any) -> Mapping[str, Mapping[str, Any]]:
+    users = _mapping(includes).get("users") or []
+    if not isinstance(users, list):
+        return {}
+    return {
+        _first_text(user.get("id")): user
+        for user in users
+        if isinstance(user, Mapping) and _first_text(user.get("id"))
+    }
+
+
+def _response_status_code(response: Any) -> int:
+    if callable(getattr(response, "getcode", None)):
+        return int(response.getcode())
+    return _optional_int(getattr(response, "status", None)) or 200
+
+
+def _response_headers(response: Any) -> Mapping[str, Any]:
+    headers = getattr(response, "headers", None)
+    if headers is None and callable(getattr(response, "info", None)):
+        headers = response.info()
+    if isinstance(headers, Mapping):
+        return headers
+    if callable(getattr(headers, "items", None)):
+        return dict(headers.items())
+    return {}
+
+
 def _raise_for_page_status(page: XBookmarkPage) -> None:
     if page.status_code == 429:
         raise XRateLimitError("X bookmark ingestion hit a rate limit", page.rate_limit)
@@ -580,6 +748,10 @@ def _optional_int(value: Any) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _clamp_page_size(value: int) -> int:
+    return min(max(int(value), 1), 100)
 
 
 def _truncate_for_table(value: str, limit: int = 96) -> str:

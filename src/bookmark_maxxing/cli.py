@@ -10,6 +10,9 @@ from typing import Sequence, TextIO
 
 from .x_mcp import (
     InMemoryXBookmarkClient,
+    XAPIReadOnlyBookmarkClient,
+    XBookmarkRequest,
+    XMCPError,
     format_ingestion_result_json,
     format_ingestion_result_markdown,
     ingest_x_bookmarks,
@@ -36,35 +39,52 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ingest_x = subcommands.add_parser(
         "ingest-x",
-        help="Normalize X bookmarks from a local fixture without making live X calls.",
+        help="Normalize X bookmarks from a fixture or explicit read-only live fetch.",
     )
     ingest_x.add_argument("--dry-run", action="store_true", default=True)
     ingest_x.add_argument(
+        "--live",
+        action="store_true",
+        help="Use read-only live X API transport. Requires env auth and never mutates X.",
+    )
+    ingest_x.add_argument(
         "--input",
         type=Path,
-        required=True,
         help="Local JSON fixture containing X bookmark pages or items.",
     )
     ingest_x.add_argument("--format", choices=("markdown", "json"), default="markdown")
     ingest_x.add_argument("--max-pages", type=int, default=10)
+    ingest_x.add_argument("--user-id", help="X user ID override for live read-only fetches.")
     ingest_x.set_defaults(handler=_ingest_x)
     return parser
 
 
 def _ingest_x(args: argparse.Namespace, output: TextIO) -> int:
-    if not args.dry_run:
-        raise SystemExit("Only --dry-run is currently supported for X ingestion.")
+    if args.live:
+        config = load_x_mcp_config()
+        try:
+            client = XAPIReadOnlyBookmarkClient(config)
+            result = ingest_x_bookmarks(
+                client,
+                config,
+                max_pages=args.max_pages,
+                request=XBookmarkRequest(user_id=args.user_id or config.user_id),
+            )
+        except XMCPError as error:
+            raise SystemExit(str(error)) from error
+    else:
+        if args.input is None:
+            raise SystemExit("--input is required unless --live is set.")
+        with args.input.open("r", encoding="utf-8") as fixture_file:
+            payload = json.load(fixture_file)
 
-    with args.input.open("r", encoding="utf-8") as fixture_file:
-        payload = json.load(fixture_file)
-
-    client = InMemoryXBookmarkClient(load_fixture_pages(payload))
-    result = ingest_x_bookmarks(
-        client,
-        load_x_mcp_config({}),
-        max_pages=args.max_pages,
-        require_auth=False,
-    )
+        client = InMemoryXBookmarkClient(load_fixture_pages(payload))
+        result = ingest_x_bookmarks(
+            client,
+            load_x_mcp_config({}),
+            max_pages=args.max_pages,
+            require_auth=False,
+        )
 
     if args.format == "json":
         output.write(format_ingestion_result_json(result))

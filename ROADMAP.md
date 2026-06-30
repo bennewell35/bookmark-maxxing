@@ -61,7 +61,8 @@ Current status:
 
 - read-only client boundary added
 - fixture-backed dry-run ingestion added
-- no live X MCP/API transport yet
+- direct read-only X API transport added behind explicit live configuration
+- no MCP-native transport yet
 - no mutation methods are exposed or accepted by the ingestion pipeline
 
 MVP capabilities:
