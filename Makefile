@@ -5,13 +5,16 @@ MODEL ?= bookmark-maxxing
 FIXTURE ?= tests/fixtures/x_mcp_bookmarks.json
 INPUT ?= /tmp/bm.json
 PROMPT ?= extract-skills
+CLI ?= PYTHONPATH=src python3 -m bookmark_maxxing.cli
+SMOKE_INPUT ?= /tmp/bookmark-maxxing-smoke.json
 
-.PHONY: help install test lint model model-down ingest extract summaries demo
+.PHONY: help install test smoke lint model model-down ingest extract summaries demo
 
 help:
 	@echo "Targets:"
 	@echo "  install     editable install into ./.venv"
 	@echo "  test        run the unit suite + compile/whitespace checks"
+	@echo "  smoke       run the offline MCP ingest/extract CLI path"
 	@echo "  model       start the Ollama container and build the pinned '$(MODEL)' model"
 	@echo "  model-down  stop the Ollama container"
 	@echo "  ingest      ingest the fixture bookmarks -> $(INPUT)"
@@ -27,6 +30,11 @@ test:
 	PYTHONPATH=src python3 -m unittest discover -s tests
 	python3 -m compileall -q src tests
 	git diff --check
+	$(MAKE) smoke
+
+smoke:
+	$(CLI) ingest-x --mcp --input $(FIXTURE) --format json > $(SMOKE_INPUT)
+	$(CLI) extract --input $(SMOKE_INPUT) --prompt read-bookmarks > /dev/null
 
 # Bring up Ollama in Docker and build the pinned model from the Modelfile.
 # Downloads the small base model on first run (no weights committed to git).
@@ -41,14 +49,14 @@ model-down:
 	docker compose down
 
 ingest:
-	bookmark-maxxing ingest-x --mcp --input $(FIXTURE) --format json > $(INPUT)
+	$(CLI) ingest-x --mcp --input $(FIXTURE) --format json > $(INPUT)
 	@echo "wrote $(INPUT)"
 
 extract: ingest
-	bookmark-maxxing extract --input $(INPUT) --prompt $(PROMPT)
+	$(CLI) extract --input $(INPUT) --prompt $(PROMPT)
 
 summaries: ingest
-	BOOKMARK_MAXXING_LLM_MODEL=$(MODEL) bookmark-maxxing extract --input $(INPUT) --prompt read-bookmarks --llm
+	BOOKMARK_MAXXING_LLM_MODEL=$(MODEL) $(CLI) extract --input $(INPUT) --prompt read-bookmarks --llm
 
 demo: ingest
-	BOOKMARK_MAXXING_LLM_MODEL=$(MODEL) bookmark-maxxing extract --input $(INPUT) --prompt extract-skills --llm
+	BOOKMARK_MAXXING_LLM_MODEL=$(MODEL) $(CLI) extract --input $(INPUT) --prompt extract-skills --llm
