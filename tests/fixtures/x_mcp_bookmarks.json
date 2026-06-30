@@ -1,0 +1,48 @@
+{
+  "_comment": "Synthetic, public-safe recording of two X MCP `tools/call` results for the read-only bookmarks list tool. No credentials or private data. Page 1 uses an MCP `structuredContent` envelope; page 2 uses a `content` text block to exercise both mappers. Used by the offline MCP demo (`ingest-x --mcp --input ...`) and tests.",
+  "results": [
+    {
+      "isError": false,
+      "structuredContent": {
+        "data": [
+          {
+            "id": "1",
+            "author_id": "100",
+            "created_at": "2026-06-28T16:41:08Z",
+            "text": "Bookmarks are the input. Skills are the output.",
+            "entities": {
+              "urls": [
+                {
+                  "expanded_url": "https://example.com/bookmark-maxxing",
+                  "url": "https://t.co/abc"
+                }
+              ]
+            }
+          },
+          {
+            "id": "2",
+            "author_id": "101",
+            "created_at": "2026-06-27T10:00:00Z",
+            "text": "Design repeatable systems, not better prompts."
+          }
+        ],
+        "includes": {
+          "users": [
+            {"id": "100", "name": "Ben (AI eng)", "username": "ben_ai_eng"},
+            {"id": "101", "name": "Systems Builder", "username": "systems_builder"}
+          ]
+        },
+        "meta": {"next_token": "mcp-page-2"}
+      }
+    },
+    {
+      "isError": false,
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"data\":[{\"id\":\"3\",\"author_id\":\"102\",\"created_at\":\"2026-06-26T09:30:00Z\",\"text\":\"Source maps make learning artifacts auditable.\"}],\"includes\":{\"users\":[{\"id\":\"102\",\"name\":\"Source Mapper\",\"username\":\"source_mapper\"}]},\"meta\":{}}"
+        }
+      ]
+    }
+  ]
+}

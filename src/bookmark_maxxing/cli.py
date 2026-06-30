@@ -9,15 +9,19 @@ from pathlib import Path
 from typing import Sequence, TextIO
 
 from .x_mcp import (
+    InMemoryMCPToolCaller,
     InMemoryXBookmarkClient,
     XAPIReadOnlyBookmarkClient,
     XBookmarkRequest,
+    XMCPBookmarkClient,
     XMCPError,
     format_ingestion_result_json,
     format_ingestion_result_markdown,
     ingest_x_bookmarks,
     load_fixture_pages,
+    load_mcp_fixture_results,
     load_x_mcp_config,
+    validate_x_mcp_config,
 )
 
 
@@ -45,12 +49,20 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_x.add_argument(
         "--live",
         action="store_true",
-        help="Use read-only live X API transport. Requires env auth and never mutates X.",
+        help="Use read-only live X API v2 transport. Requires env auth and never mutates X.",
+    )
+    ingest_x.add_argument(
+        "--mcp",
+        action="store_true",
+        help=(
+            "Use the official X MCP server (read-only) via the xurl mcp bridge. "
+            "With --input, replays a recorded MCP fixture offline."
+        ),
     )
     ingest_x.add_argument(
         "--input",
         type=Path,
-        help="Local JSON fixture containing X bookmark pages or items.",
+        help="Local JSON fixture containing X bookmark pages, items, or MCP results.",
     )
     ingest_x.add_argument("--format", choices=("markdown", "json"), default="markdown")
     ingest_x.add_argument("--max-pages", type=int, default=10)
@@ -60,37 +72,90 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _ingest_x(args: argparse.Namespace, output: TextIO) -> int:
-    if args.live:
-        config = load_x_mcp_config()
-        try:
-            client = XAPIReadOnlyBookmarkClient(config)
-            result = ingest_x_bookmarks(
-                client,
-                config,
-                max_pages=args.max_pages,
-                request=XBookmarkRequest(user_id=args.user_id or config.user_id),
-            )
-        except XMCPError as error:
-            raise SystemExit(str(error)) from error
-    else:
-        if args.input is None:
-            raise SystemExit("--input is required unless --live is set.")
-        with args.input.open("r", encoding="utf-8") as fixture_file:
-            payload = json.load(fixture_file)
+    if args.live and args.mcp:
+        raise SystemExit("Use either --live or --mcp, not both.")
 
-        client = InMemoryXBookmarkClient(load_fixture_pages(payload))
-        result = ingest_x_bookmarks(
-            client,
-            load_x_mcp_config({}),
-            max_pages=args.max_pages,
-            require_auth=False,
-        )
+    if args.mcp:
+        result = _ingest_via_mcp(args)
+    elif args.live:
+        result = _ingest_via_live_api(args)
+    else:
+        result = _ingest_via_fixture(args)
 
     if args.format == "json":
         output.write(format_ingestion_result_json(result))
     else:
         output.write(format_ingestion_result_markdown(result))
     return 0
+
+
+def _ingest_via_live_api(args: argparse.Namespace):
+    config = load_x_mcp_config()
+    try:
+        client = XAPIReadOnlyBookmarkClient(config)
+        return ingest_x_bookmarks(
+            client,
+            config,
+            max_pages=args.max_pages,
+            request=XBookmarkRequest(user_id=args.user_id or config.user_id),
+        )
+    except XMCPError as error:
+        raise SystemExit(str(error)) from error
+
+
+def _ingest_via_mcp(args: argparse.Namespace):
+    if args.input is not None:
+        return _ingest_via_mcp_fixture(args)
+
+    config = load_x_mcp_config()
+    try:
+        validate_x_mcp_config(config)
+        client = XMCPBookmarkClient(config)
+        return ingest_x_bookmarks(
+            client,
+            config,
+            max_pages=args.max_pages,
+            require_auth=False,
+            request=XBookmarkRequest(user_id=args.user_id or config.user_id),
+        )
+    except XMCPError as error:
+        raise SystemExit(str(error)) from error
+
+
+def _ingest_via_mcp_fixture(args: argparse.Namespace):
+    with args.input.open("r", encoding="utf-8") as fixture_file:
+        payload = json.load(fixture_file)
+
+    config = load_x_mcp_config({})
+    try:
+        caller = InMemoryMCPToolCaller(load_mcp_fixture_results(payload))
+        client = XMCPBookmarkClient(
+            config, caller=caller
+        )
+        return ingest_x_bookmarks(
+            client,
+            config,
+            max_pages=args.max_pages,
+            require_auth=False,
+            request=XBookmarkRequest(user_id=args.user_id or "fixture-user"),
+        )
+    except XMCPError as error:
+        raise SystemExit(str(error)) from error
+
+
+def _ingest_via_fixture(args: argparse.Namespace):
+    if args.input is None:
+        raise SystemExit("--input is required unless --live or --mcp is set.")
+    with args.input.open("r", encoding="utf-8") as fixture_file:
+        payload = json.load(fixture_file)
+
+    client = InMemoryXBookmarkClient(load_fixture_pages(payload))
+    return ingest_x_bookmarks(
+        client,
+        load_x_mcp_config({}),
+        max_pages=args.max_pages,
+        require_auth=False,
+    )
 
 
 if __name__ == "__main__":

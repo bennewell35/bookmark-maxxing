@@ -143,10 +143,20 @@ Bookmark Maxxing ships a small, read-only CLI that normalizes X bookmarks into a
 
 ### What it does
 
-- Reads X-shaped bookmark records (from a local fixture, or an opt-in read-only live fetch).
+- Reads X-shaped bookmark records through one of three read-only paths.
 - Normalizes them into a consistent shape, preserving author and source attribution.
 - Validates and deduplicates them.
 - Emits a deterministic Markdown source map or JSON document you can feed into the framework prompts.
+
+### Three read-only ingestion paths
+
+| Path | Flag | Network | Auth | When to use |
+|---|---|---|---|---|
+| Fixture dry-run | `--dry-run --input <file>` (default) | none | none | Safe demo, tests, CI |
+| Direct X API v2 | `--live` | `GET /2/users/{id}/bookmarks` | `X_API_USER_ID` + `X_API_BEARER_TOKEN` | A bearer token, no MCP tooling |
+| Official X MCP | `--mcp` | `xurl mcp` → `https://api.x.com/mcp` | xurl OAuth (`xurl auth oauth2`) | The hosted X MCP server |
+
+All three are strictly read-only: only a bookmarks **list** operation is ever invoked, and any mutation method/tool is rejected.
 
 ### Install locally
 
@@ -199,6 +209,34 @@ Live mode rules:
 - Requires `X_API_USER_ID` and `X_API_BEARER_TOKEN` set locally. Never commit them.
 - Output may contain **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
 - Do not commit generated output. `.gitignore` already excludes `.env`, `tmp/`, `raw/`, and `exports/private/`.
+
+### Optional: official X MCP mode
+
+`--mcp` ingests bookmarks through the official hosted **X MCP server** (`https://api.x.com/mcp`), reached via the open-source [`xurl mcp`](https://github.com/xdevplatform/xurl) bridge. It invokes only a read-only bookmarks **list** tool and refuses any mutating tool, so it cannot add, remove, or change bookmarks.
+
+Try it fully offline first — replay a recorded MCP response with no network or credentials:
+
+```bash
+bookmark-maxxing ingest-x --mcp --input tests/fixtures/x_mcp_bookmarks.json --format json
+```
+
+Live MCP fetch (opt-in, read-only) needs xurl installed and authenticated once:
+
+```bash
+# one-time: install xurl and log in (OAuth2)
+npm install -g @xdevplatform/xurl      # or: brew install --cask xdevplatform/tap/xurl
+xurl auth oauth2                       # add --headless on a remote box
+
+export X_API_USER_ID=...               # your numeric X user ID
+bookmark-maxxing ingest-x --mcp --format json --max-pages 1 > /tmp/my-bookmarks.json
+```
+
+MCP mode notes:
+
+- The bridge command defaults to `xurl mcp https://api.x.com/mcp`; override with `X_MCP_BRIDGE_COMMAND` (e.g. to use `npx -y @xdevplatform/xurl mcp ...`).
+- X does not publish a stable tool name for the bookmarks list operation. The default is `get_users_id_bookmarks`; override with `X_MCP_BOOKMARKS_TOOL` (discover names via the bridge's `tools/list`).
+- If xurl is missing or unauthenticated, `--mcp` exits cleanly with a clear message and makes no partial calls.
+- Output may contain **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
 
 See [`docs/live-smoke-test.md`](docs/live-smoke-test.md) for a safe live read-only smoke test, and [`docs/x-mcp-integration.md`](docs/x-mcp-integration.md) for the full integration reference.
 
@@ -275,6 +313,7 @@ bookmark-maxxing/
   tests/
     fixtures/
       x_bookmarks_pages.json
+      x_mcp_bookmarks.json
     test_x_mcp.py
   pyproject.toml
   prompts/
@@ -334,6 +373,6 @@ The current useful version is:
 - templates
 - weekly examples
 - source attribution
-- a read-only X bookmark CLI (fixture dry-run by default, opt-in live mode)
+- a read-only X bookmark CLI with three paths: fixture dry-run (default), direct X API v2, and official X MCP
 
 The next layers extend the CLI to normalize exports from GitHub, Slack, newsletters, and browser bookmarks. See [`docs/release-checklist.md`](docs/release-checklist.md) for what remains before the v0.1.0 release.

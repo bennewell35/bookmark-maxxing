@@ -1,6 +1,9 @@
 import io
 import json
+import sys
+import tempfile
 from pathlib import Path
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
 import unittest
 
@@ -8,30 +11,69 @@ from bookmark_maxxing.cli import main as cli_main
 from bookmark_maxxing.x_mcp import (
     InMemoryXBookmarkClient,
     RateLimitInfo,
+    StdioMCPBridge,
     XAPIReadOnlyBookmarkClient,
     X_API_DEFAULT_BASE_URL,
     XAuthConfigurationError,
     XBookmarkPage,
     XBookmarkRequest,
     X_DOCS_MCP_DEFAULT_URL,
+    X_MCP_DEFAULT_BOOKMARKS_TOOL,
     X_MCP_DEFAULT_URL,
+    XMCPBookmarkClient,
+    XMCPTransportError,
     XRateLimitError,
     XReadOnlyViolationError,
     assert_read_only_client,
+    assert_read_only_mcp_tool,
     format_ingestion_result_json,
     format_ingestion_result_markdown,
     format_markdown_source_map,
     ingest_x_bookmarks,
     load_fixture_pages,
+    load_mcp_fixture_results,
     load_x_mcp_config,
     normalize_x_bookmark,
     validate_bookmark,
     validate_x_api_transport_config,
     validate_x_auth_config,
+    validate_x_mcp_config,
 )
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "x_bookmarks_pages.json"
+MCP_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "x_mcp_bookmarks.json"
+
+
+def _mcp_result(data, users, next_token=None):
+    payload = {"data": data, "includes": {"users": users}, "meta": {}}
+    if next_token is not None:
+        payload["meta"]["next_token"] = next_token
+    return {"isError": False, "structuredContent": payload}
+
+
+_FAKE_MCP_SERVER = """
+import json, sys
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        out = {"jsonrpc": "2.0", "id": msg["id"], "result": {"protocolVersion": "2025-06-18", "serverInfo": {"name": "fake"}}}
+        sys.stdout.write(json.dumps(out) + "\\n"); sys.stdout.flush()
+    elif method == "notifications/initialized":
+        continue
+    elif method == "tools/call":
+        result = {"structuredContent": {"data": [{"id": "9", "author_id": "100", "text": "from fake bridge"}], "includes": {"users": [{"id": "100", "username": "fake_user", "name": "Fake User"}]}, "meta": {}}}
+        out = {"jsonrpc": "2.0", "id": msg["id"], "result": result}
+        sys.stdout.write(json.dumps(out) + "\\n"); sys.stdout.flush()
+    else:
+        out = {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32601, "message": "method not found"}}
+        sys.stdout.write(json.dumps(out) + "\\n"); sys.stdout.flush()
+"""
 
 
 class XMCPLocalConfigTests(unittest.TestCase):
@@ -436,6 +478,324 @@ class FakeOpener:
         self.requests.append(request)
         self.timeouts.append(timeout)
         return self.response
+
+
+class RecordingMCPToolCaller:
+    """Spy MCP caller that records calls and replays canned results."""
+
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def call_tool(self, name, arguments):
+        index = len(self.calls)
+        self.calls.append((name, dict(arguments)))
+        return self.results[index]
+
+
+class XMCPConfigTests(unittest.TestCase):
+    def test_load_config_defaults_mcp_bridge_and_tool(self):
+        config = load_x_mcp_config({})
+
+        self.assertEqual(config.mcp_bridge_command, ("xurl", "mcp", X_MCP_DEFAULT_URL))
+        self.assertEqual(config.mcp_bookmarks_tool, X_MCP_DEFAULT_BOOKMARKS_TOOL)
+
+    def test_load_config_overrides_bridge_command_and_tool(self):
+        config = load_x_mcp_config(
+            {
+                "X_MCP_BRIDGE_COMMAND": "npx -y @xdevplatform/xurl mcp https://api.x.com/mcp",
+                "X_MCP_BOOKMARKS_TOOL": "get_users_id_bookmarks_custom",
+            }
+        )
+
+        self.assertEqual(
+            config.mcp_bridge_command,
+            ("npx", "-y", "@xdevplatform/xurl", "mcp", "https://api.x.com/mcp"),
+        )
+        self.assertEqual(config.mcp_bookmarks_tool, "get_users_id_bookmarks_custom")
+
+    def test_validate_mcp_config_accepts_default(self):
+        validate_x_mcp_config(load_x_mcp_config({}))
+
+    def test_validate_mcp_config_rejects_mutating_tool(self):
+        with self.assertRaises(XReadOnlyViolationError):
+            validate_x_mcp_config(
+                load_x_mcp_config({"X_MCP_BOOKMARKS_TOOL": "add_bookmark"})
+            )
+
+
+class AssertReadOnlyMCPToolTests(unittest.TestCase):
+    def test_accepts_read_only_bookmark_tool(self):
+        assert_read_only_mcp_tool("get_users_id_bookmarks")
+
+    def test_rejects_non_bookmark_tool(self):
+        with self.assertRaises(XReadOnlyViolationError):
+            assert_read_only_mcp_tool("get_users_id_tweets")
+
+    def test_rejects_mutating_bookmark_tools(self):
+        for tool in (
+            "add_bookmark",
+            "remove_bookmark",
+            "delete_users_id_bookmarks",
+            "post_users_id_bookmarks",
+            "create_bookmark_folder",
+        ):
+            with self.subTest(tool=tool):
+                with self.assertRaises(XReadOnlyViolationError):
+                    assert_read_only_mcp_tool(tool)
+
+    def test_rejects_empty_tool_name(self):
+        with self.assertRaises(Exception):
+            assert_read_only_mcp_tool("")
+
+
+class XMCPBookmarkClientTests(unittest.TestCase):
+    def test_maps_structured_content_into_normalized_output(self):
+        caller = RecordingMCPToolCaller(
+            [
+                _mcp_result(
+                    data=[
+                        {
+                            "id": "10",
+                            "author_id": "100",
+                            "created_at": "2026-06-28T16:41:08Z",
+                            "text": "A saved post from MCP.",
+                            "entities": {
+                                "urls": [
+                                    {
+                                        "expanded_url": "https://example.com/read",
+                                        "url": "https://t.co/read",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    users=[{"id": "100", "name": "MCP Builder", "username": "mcp_builder"}],
+                )
+            ]
+        )
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({"X_API_USER_ID": "42"}), caller=caller
+        )
+
+        result = ingest_x_bookmarks(client, client.config, require_auth=False)
+
+        self.assertEqual(caller.calls[0][0], X_MCP_DEFAULT_BOOKMARKS_TOOL)
+        self.assertEqual(caller.calls[0][1]["id"], "42")
+        self.assertEqual(len(result.bookmarks), 1)
+        bookmark = result.bookmarks[0]
+        self.assertEqual(bookmark.author_username, "mcp_builder")
+        self.assertEqual(bookmark.source_url, "https://x.com/mcp_builder/status/10")
+        self.assertEqual(bookmark.linked_urls, ("https://example.com/read",))
+
+    def test_maps_text_content_block(self):
+        payload = {
+            "data": [{"id": "11", "author_id": "200", "text": "Text-content post."}],
+            "includes": {"users": [{"id": "200", "username": "text_author", "name": "Text"}]},
+            "meta": {},
+        }
+        caller = RecordingMCPToolCaller(
+            [{"content": [{"type": "text", "text": json.dumps(payload)}]}]
+        )
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({"X_API_USER_ID": "42"}), caller=caller
+        )
+
+        result = ingest_x_bookmarks(client, client.config, require_auth=False)
+
+        self.assertEqual(result.bookmarks[0].author_username, "text_author")
+
+    def test_preserves_pagination_cursor_across_pages(self):
+        caller = RecordingMCPToolCaller(
+            [
+                _mcp_result(
+                    data=[{"id": "1", "author_id": "100", "text": "First."}],
+                    users=[{"id": "100", "username": "a", "name": "A"}],
+                    next_token="mcp-page-2",
+                ),
+                _mcp_result(
+                    data=[{"id": "2", "author_id": "101", "text": "Second."}],
+                    users=[{"id": "101", "username": "b", "name": "B"}],
+                ),
+            ]
+        )
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({"X_API_USER_ID": "42"}), caller=caller
+        )
+
+        result = ingest_x_bookmarks(client, client.config, require_auth=False)
+
+        self.assertEqual(len(caller.calls), 2)
+        self.assertNotIn("pagination_token", caller.calls[0][1])
+        self.assertEqual(caller.calls[1][1]["pagination_token"], "mcp-page-2")
+        self.assertEqual(result.pages_fetched, 2)
+        self.assertEqual(len(result.bookmarks), 2)
+        self.assertFalse(result.truncated)
+
+    def test_requires_user_id_before_fetch(self):
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({}), caller=RecordingMCPToolCaller([])
+        )
+
+        with self.assertRaises(XAuthConfigurationError):
+            client.fetch_bookmarks_page(XBookmarkRequest())
+
+    def test_refuses_to_construct_with_mutating_tool(self):
+        config = load_x_mcp_config({"X_MCP_BOOKMARKS_TOOL": "remove_bookmark"})
+
+        with self.assertRaises(XReadOnlyViolationError):
+            XMCPBookmarkClient(config, caller=RecordingMCPToolCaller([]))
+
+    def test_exposes_no_mutation_methods(self):
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({"X_API_USER_ID": "42"}),
+            caller=RecordingMCPToolCaller([]),
+        )
+
+        assert_read_only_client(client)
+        for method_name in ("like", "reply", "repost", "follow", "unbookmark", "add_bookmark"):
+            self.assertFalse(hasattr(client, method_name))
+
+    def test_only_invokes_the_configured_read_only_tool(self):
+        caller = RecordingMCPToolCaller(
+            [_mcp_result(data=[], users=[])]
+        )
+        client = XMCPBookmarkClient(
+            load_x_mcp_config({"X_API_USER_ID": "42"}), caller=caller
+        )
+
+        ingest_x_bookmarks(client, client.config, require_auth=False)
+
+        invoked = {name for name, _ in caller.calls}
+        self.assertEqual(invoked, {X_MCP_DEFAULT_BOOKMARKS_TOOL})
+        for name, _ in caller.calls:
+            assert_read_only_mcp_tool(name)
+
+
+class MCPFixtureLoaderTests(unittest.TestCase):
+    def test_loads_results_key(self):
+        results = load_mcp_fixture_results({"results": [{"structuredContent": {"data": []}}]})
+        self.assertEqual(len(results), 1)
+
+    def test_wraps_single_result_object(self):
+        results = load_mcp_fixture_results({"structuredContent": {"data": []}})
+        self.assertEqual(len(results), 1)
+
+    def test_rejects_non_object_result(self):
+        with self.assertRaises(Exception):
+            load_mcp_fixture_results(["not-an-object"])
+
+
+class StdioMCPBridgeTests(unittest.TestCase):
+    def test_missing_command_fails_cleanly(self):
+        bridge = StdioMCPBridge(["definitely-not-a-real-command-xyz"])
+
+        with self.assertRaises(XAuthConfigurationError):
+            bridge.call_tool("get_users_id_bookmarks", {"id": "42"})
+
+    def test_roundtrip_against_fake_stdio_server(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "fake_mcp_server.py"
+            script.write_text(_FAKE_MCP_SERVER, encoding="utf-8")
+            bridge = StdioMCPBridge([sys.executable, str(script)])
+            try:
+                client = XMCPBookmarkClient(
+                    load_x_mcp_config({"X_API_USER_ID": "42"}), caller=bridge
+                )
+                page = client.fetch_bookmarks_page(XBookmarkRequest())
+            finally:
+                bridge.close()
+
+        self.assertEqual(page.items[0]["author"]["username"], "fake_user")
+        self.assertEqual(page.items[0]["text"], "from fake bridge")
+
+    def test_bridge_maps_tool_error_envelope(self):
+        bridge = StdioMCPBridge(["unused"])
+        error_envelope = {
+            "result": {"isError": True, "content": [{"type": "text", "text": "boom"}]}
+        }
+        with mock.patch.object(StdioMCPBridge, "_ensure_started", lambda self: None), mock.patch.object(
+            StdioMCPBridge, "_request", lambda self, method, params: error_envelope
+        ):
+            with self.assertRaises(XMCPTransportError) as error:
+                bridge.call_tool("get_users_id_bookmarks", {"id": "42"})
+
+        self.assertIn("boom", str(error.exception))
+
+
+class XMCPCLITests(unittest.TestCase):
+    def test_mcp_fixture_cli_outputs_json(self):
+        output = io.StringIO()
+
+        exit_code = cli_main(
+            ["ingest-x", "--mcp", "--input", str(MCP_FIXTURE_PATH), "--format", "json"],
+            stdout=output,
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"pages_fetched": 2', output.getvalue())
+        self.assertIn('"author_username": "ben_ai_eng"', output.getvalue())
+        self.assertIn('"author_username": "source_mapper"', output.getvalue())
+
+    def test_mcp_fixture_cli_markdown_has_source_map(self):
+        output = io.StringIO()
+
+        cli_main(
+            ["ingest-x", "--mcp", "--input", str(MCP_FIXTURE_PATH), "--format", "markdown"],
+            stdout=output,
+        )
+
+        text = output.getvalue()
+        self.assertIn("# X Bookmark Source Map", text)
+        self.assertIn("@ben_ai_eng", text)
+        self.assertIn("[source](https://x.com/source_mapper/status/3)", text)
+
+    def test_mcp_fixture_cli_is_deterministic(self):
+        for output_format in ("json", "markdown"):
+            first = io.StringIO()
+            second = io.StringIO()
+            cli_main(
+                ["ingest-x", "--mcp", "--input", str(MCP_FIXTURE_PATH), "--format", output_format],
+                stdout=first,
+            )
+            cli_main(
+                ["ingest-x", "--mcp", "--input", str(MCP_FIXTURE_PATH), "--format", output_format],
+                stdout=second,
+            )
+            self.assertEqual(first.getvalue(), second.getvalue())
+
+    def test_live_and_mcp_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            cli_main(["ingest-x", "--live", "--mcp", "--format", "json"], stdout=io.StringIO())
+
+    def test_dry_run_and_mcp_fixture_make_no_bridge_call(self):
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("StdioMCPBridge must not be constructed offline")
+
+        mcp_out = io.StringIO()
+        with mock.patch("bookmark_maxxing.x_mcp.StdioMCPBridge", _boom):
+            # Fixture dry-run path must not touch the MCP bridge.
+            cli_main(
+                ["ingest-x", "--dry-run", "--input", str(FIXTURE_PATH), "--format", "json"],
+                stdout=io.StringIO(),
+            )
+            # MCP fixture path replays offline; still no bridge.
+            cli_main(
+                ["ingest-x", "--mcp", "--input", str(MCP_FIXTURE_PATH), "--format", "json"],
+                stdout=mcp_out,
+            )
+
+        self.assertIn('"pages_fetched": 2', mcp_out.getvalue())
+
+    def test_live_mcp_without_bridge_exits_cleanly(self):
+        with mock.patch("bookmark_maxxing.cli.load_x_mcp_config") as loader:
+            loader.return_value = load_x_mcp_config(
+                {"X_API_USER_ID": "42", "X_MCP_BRIDGE_COMMAND": "definitely-not-real-cmd-xyz"}
+            )
+            with self.assertRaises(SystemExit) as error:
+                cli_main(["ingest-x", "--mcp", "--format", "json"], stdout=io.StringIO())
+
+        self.assertIn("not found", str(error.exception))
 
 
 if __name__ == "__main__":

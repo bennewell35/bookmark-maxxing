@@ -8,6 +8,8 @@ read method defined by that protocol.
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 from dataclasses import dataclass, field
 from os import environ
 from urllib.error import HTTPError
@@ -37,6 +39,39 @@ MUTATING_CLIENT_METHOD_NAMES = frozenset(
     }
 )
 
+# Official X MCP server (reached through the `xurl mcp` stdio bridge).
+X_MCP_PROTOCOL_VERSION = "2025-06-18"
+X_MCP_DEFAULT_BRIDGE_COMMAND: tuple[str, ...] = ("xurl", "mcp", X_MCP_DEFAULT_URL)
+# X does not publish a stable tool name for the read-only bookmarks list
+# operation; this default is overridable via ``X_MCP_BOOKMARKS_TOOL`` and can be
+# discovered at runtime through ``tools/list``.
+X_MCP_DEFAULT_BOOKMARKS_TOOL = "get_users_id_bookmarks"
+# Tool names (or name fragments) that imply account mutation. The MCP bookmark
+# client refuses to invoke any of these, keeping the feature strictly read-only.
+MUTATING_MCP_TOOL_FRAGMENTS = frozenset(
+    {
+        "add",
+        "block",
+        "create",
+        "delete",
+        "follow",
+        "hide",
+        "like",
+        "mute",
+        "post_",
+        "publish",
+        "remove",
+        "reply",
+        "repost",
+        "retweet",
+        "unbookmark",
+        "unfollow",
+        "unlike",
+        "update",
+        "write",
+    }
+)
+
 
 class XMCPError(Exception):
     """Base error for X MCP ingestion boundaries."""
@@ -62,6 +97,10 @@ class XBookmarkPayloadError(XMCPError):
     """Raised when a fixture or client page shape is not usable."""
 
 
+class XMCPTransportError(XMCPError):
+    """Raised when the MCP bridge process fails or returns a protocol error."""
+
+
 @dataclass(frozen=True)
 class XMCPLocalConfig:
     """Environment-backed X MCP/API configuration."""
@@ -77,6 +116,8 @@ class XMCPLocalConfig:
     xurl_client_id: str | None = None
     xurl_client_secret: str | None = None
     xurl_redirect_uri: str | None = None
+    mcp_bridge_command: tuple[str, ...] = X_MCP_DEFAULT_BRIDGE_COMMAND
+    mcp_bookmarks_tool: str = X_MCP_DEFAULT_BOOKMARKS_TOOL
 
 
 @dataclass(frozen=True)
@@ -251,12 +292,321 @@ class XAPIReadOnlyBookmarkClient:
         return f"{base_url}/users/{user_id}/bookmarks?{urlencode(query)}"
 
 
+@runtime_checkable
+class MCPToolCaller(Protocol):
+    """Minimal read-only MCP tool-call boundary.
+
+    Implementations invoke a single MCP tool and return its raw ``tools/call``
+    result envelope. The default implementation bridges to the official X MCP
+    server via ``xurl mcp``; tests inject in-memory callers.
+    """
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Invoke an MCP tool by name and return its result envelope."""
+
+
+@dataclass
+class InMemoryMCPToolCaller:
+    """Fixture-backed MCP caller that replays recorded ``tools/call`` results."""
+
+    results: Sequence[Mapping[str, Any]]
+    calls: list[tuple[str, Mapping[str, Any]]] = field(default_factory=list)
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        index = len(self.calls)
+        self.calls.append((name, dict(arguments)))
+        if index >= len(self.results):
+            return {"structuredContent": {"data": []}}
+        return self.results[index]
+
+
+@dataclass
+class StdioMCPBridge:
+    """Stdio JSON-RPC bridge to a hosted MCP server (default: ``xurl mcp``).
+
+    The bridge owns a child process that speaks newline-delimited JSON-RPC on
+    stdout. This class performs the MCP handshake lazily, then forwards
+    ``tools/call`` requests. It never invokes mutating tools itself; the caller
+    decides which tool name to request.
+    """
+
+    command: Sequence[str]
+    timeout_seconds: float = 120.0
+    _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    _request_id: int = field(default=0, init=False, repr=False)
+    _started: bool = field(default=False, init=False, repr=False)
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        self._ensure_started()
+        response = self._request(
+            "tools/call", {"name": name, "arguments": dict(arguments)}
+        )
+        result = response.get("result")
+        if not isinstance(result, Mapping):
+            raise XMCPTransportError("MCP tools/call returned no result object")
+        if result.get("isError"):
+            raise XMCPTransportError(
+                f"MCP tool '{name}' reported an error: {_mcp_error_text(result)}"
+            )
+        return result
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        self._started = False
+        if process is None:
+            return
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def _ensure_started(self) -> None:
+        if self._started:
+            return
+        self._spawn()
+        self._request(
+            "initialize",
+            {
+                "protocolVersion": X_MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "bookmark-maxxing", "version": "0.1"},
+            },
+        )
+        self._notify("notifications/initialized", {})
+        self._started = True
+
+    def _spawn(self) -> None:
+        if not self.command:
+            raise XAuthConfigurationError("No MCP bridge command is configured.")
+        try:
+            self._process = subprocess.Popen(  # noqa: S603 - command is operator-configured
+                list(self.command),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError as error:
+            raise XAuthConfigurationError(
+                "MCP bridge command not found: "
+                f"'{self.command[0]}'. Install xurl and authenticate "
+                "(`xurl auth oauth2`) to use --mcp, or set X_MCP_BRIDGE_COMMAND."
+            ) from error
+        except OSError as error:
+            raise XMCPTransportError(f"Failed to start MCP bridge: {error}") from error
+
+    def _request(self, method: str, params: Mapping[str, Any]) -> Mapping[str, Any]:
+        self._request_id += 1
+        request_id = self._request_id
+        self._write({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        while True:
+            message = self._read_message()
+            if message.get("id") == request_id:
+                if "error" in message:
+                    raise XMCPTransportError(
+                        f"MCP {method} failed: {_mcp_jsonrpc_error_text(message['error'])}"
+                    )
+                return message
+
+    def _notify(self, method: str, params: Mapping[str, Any]) -> None:
+        self._write({"jsonrpc": "2.0", "method": method, "params": params})
+
+    def _write(self, message: Mapping[str, Any]) -> None:
+        process = self._process
+        if process is None or process.stdin is None:
+            raise XMCPTransportError("MCP bridge process is not available")
+        try:
+            process.stdin.write(json.dumps(message) + "\n")
+            process.stdin.flush()
+        except (BrokenPipeError, ValueError) as error:
+            raise XMCPTransportError(f"MCP bridge stdin closed: {self._stderr_tail()}") from error
+
+    def _read_message(self) -> Mapping[str, Any]:
+        process = self._process
+        if process is None or process.stdout is None:
+            raise XMCPTransportError("MCP bridge process is not available")
+        while True:
+            line = process.stdout.readline()
+            if line == "":
+                raise XMCPTransportError(
+                    "MCP bridge closed without responding: " + self._stderr_tail()
+                )
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(message, Mapping):
+                return message
+
+    def _stderr_tail(self) -> str:
+        process = self._process
+        if process is None or process.stderr is None:
+            return "no diagnostics available"
+        try:
+            text = process.stderr.read() or ""
+        except (OSError, ValueError):
+            return "no diagnostics available"
+        text = text.strip()
+        return text[-500:] if text else "no diagnostics available"
+
+
+@dataclass
+class XMCPBookmarkClient:
+    """Read-only bookmark client backed by the official X MCP server.
+
+    Bookmarks are fetched by invoking a single read-only MCP tool. The client
+    refuses to invoke any tool whose name implies mutation, so it cannot add,
+    remove, or otherwise change bookmarks or account state.
+    """
+
+    config: XMCPLocalConfig
+    caller: MCPToolCaller | None = None
+
+    def __post_init__(self) -> None:
+        assert_read_only_mcp_tool(self.config.mcp_bookmarks_tool)
+
+    def fetch_bookmarks_page(self, request: XBookmarkRequest) -> XBookmarkPage:
+        user_id = request.user_id or self.config.user_id
+        if user_id is None:
+            raise XAuthConfigurationError(
+                "X_API_USER_ID is required for MCP bookmark fetches."
+            )
+
+        tool_name = self.config.mcp_bookmarks_tool
+        assert_read_only_mcp_tool(tool_name)
+
+        arguments: dict[str, Any] = {
+            "id": user_id,
+            "max_results": _clamp_page_size(request.max_results),
+        }
+        if request.pagination_token:
+            arguments["pagination_token"] = request.pagination_token
+
+        result = self._caller().call_tool(tool_name, arguments)
+        payload = _payload_from_mcp_result(result)
+        return _page_from_x_api_payload(payload)
+
+    def _caller(self) -> MCPToolCaller:
+        if self.caller is None:
+            self.caller = StdioMCPBridge(self.config.mcp_bridge_command)
+        return self.caller
+
+
+def assert_read_only_mcp_tool(tool_name: str) -> None:
+    """Reject MCP tool names that imply account mutation."""
+
+    normalized = (tool_name or "").strip().lower()
+    if not normalized:
+        raise XBookmarkPayloadError("MCP bookmarks tool name must not be empty")
+    if "bookmark" not in normalized:
+        raise XReadOnlyViolationError(
+            f"MCP bookmark tool '{tool_name}' must reference bookmarks"
+        )
+    for fragment in MUTATING_MCP_TOOL_FRAGMENTS:
+        if fragment in normalized:
+            raise XReadOnlyViolationError(
+                f"Refusing to use mutating MCP tool '{tool_name}'"
+            )
+
+
+def validate_x_mcp_config(config: XMCPLocalConfig) -> None:
+    """Validate that the MCP bridge is configured and the tool is read-only."""
+
+    if not config.mcp_bridge_command:
+        raise XAuthConfigurationError(
+            "No MCP bridge command configured. Install xurl or set X_MCP_BRIDGE_COMMAND."
+        )
+    assert_read_only_mcp_tool(config.mcp_bookmarks_tool)
+
+
+def load_mcp_fixture_results(payload: Any) -> tuple[Mapping[str, Any], ...]:
+    """Load recorded MCP ``tools/call`` results from a fixture payload."""
+
+    if isinstance(payload, Mapping):
+        results = payload.get("results", payload.get("pages"))
+        if results is None:
+            return (payload,)
+        payload = results
+    if not isinstance(payload, list):
+        raise XBookmarkPayloadError("MCP fixture must be an object or list of results")
+    parsed: list[Mapping[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            raise XBookmarkPayloadError("MCP fixture result must be an object")
+        parsed.append(item)
+    return tuple(parsed)
+
+
+def _payload_from_mcp_result(result: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Extract an X API v2 payload from an MCP ``tools/call`` result envelope."""
+
+    structured = result.get("structuredContent")
+    if isinstance(structured, Mapping) and "data" in structured:
+        return structured
+
+    content = result.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, Mapping):
+                continue
+            text = block.get("text")
+            if not isinstance(text, str):
+                continue
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError as error:
+                raise XBookmarkPayloadError(
+                    "MCP text content was not valid JSON"
+                ) from error
+            if isinstance(decoded, Mapping):
+                return decoded
+
+    if "data" in result:
+        return result
+
+    raise XBookmarkPayloadError("MCP result did not contain a bookmark payload")
+
+
+def _mcp_error_text(result: Mapping[str, Any]) -> str:
+    content = result.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, Mapping) and isinstance(block.get("text"), str):
+                return block["text"]
+    return "unknown MCP tool error"
+
+
+def _mcp_jsonrpc_error_text(error: Any) -> str:
+    if isinstance(error, Mapping):
+        message = _first_text(error.get("message"))
+        code = error.get("code")
+        if message and code is not None:
+            return f"{message} (code {code})"
+        if message:
+            return message
+    return str(error)
+
+
 def load_x_mcp_config(env: Mapping[str, str] | None = None) -> XMCPLocalConfig:
     """Load local X MCP/API configuration from environment variables."""
 
     values = environ if env is None else env
+    mcp_server_url = values.get("X_MCP_SERVER_URL", X_MCP_DEFAULT_URL)
     return XMCPLocalConfig(
-        mcp_server_url=values.get("X_MCP_SERVER_URL", X_MCP_DEFAULT_URL),
+        mcp_server_url=mcp_server_url,
         docs_mcp_server_url=values.get("X_DOCS_MCP_SERVER_URL", X_DOCS_MCP_DEFAULT_URL),
         api_base_url=values.get("X_API_BASE_URL", X_API_DEFAULT_BASE_URL),
         user_id=_empty_to_none(values.get("X_API_USER_ID")),
@@ -267,7 +617,20 @@ def load_x_mcp_config(env: Mapping[str, str] | None = None) -> XMCPLocalConfig:
         xurl_client_id=_empty_to_none(values.get("CLIENT_ID")),
         xurl_client_secret=_empty_to_none(values.get("CLIENT_SECRET")),
         xurl_redirect_uri=_empty_to_none(values.get("REDIRECT_URI")),
+        mcp_bridge_command=_resolve_bridge_command(
+            values.get("X_MCP_BRIDGE_COMMAND"), mcp_server_url
+        ),
+        mcp_bookmarks_tool=(
+            _empty_to_none(values.get("X_MCP_BOOKMARKS_TOOL")) or X_MCP_DEFAULT_BOOKMARKS_TOOL
+        ),
     )
+
+
+def _resolve_bridge_command(raw: str | None, mcp_server_url: str) -> tuple[str, ...]:
+    command = _empty_to_none(raw)
+    if command is not None:
+        return tuple(shlex.split(command))
+    return ("xurl", "mcp", mcp_server_url)
 
 
 def validate_x_auth_config(config: XMCPLocalConfig) -> None:
