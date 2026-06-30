@@ -1,5 +1,21 @@
 """Bookmark Maxxing utilities."""
 
+from .extract import (
+    DEFAULT_EXTRACT_PROMPT,
+    EXTRACT_PROMPTS,
+    BookmarkInputError,
+    ComposeOnlyPromptRunner,
+    ExtractError,
+    ExtractInput,
+    PromptNotFoundError,
+    PromptRunner,
+    available_prompts,
+    compose_prompt,
+    load_extract_input,
+    load_extract_input_from_payload,
+    load_prompt_text,
+    run_extract,
+)
 from .x_mcp import (
     BookmarkValidationIssue,
     InMemoryMCPToolCaller,
@@ -42,7 +58,21 @@ from .x_mcp import (
 )
 
 __all__ = [
+    "DEFAULT_EXTRACT_PROMPT",
+    "EXTRACT_PROMPTS",
+    "BookmarkInputError",
     "BookmarkValidationIssue",
+    "ComposeOnlyPromptRunner",
+    "ExtractError",
+    "ExtractInput",
+    "PromptNotFoundError",
+    "PromptRunner",
+    "available_prompts",
+    "compose_prompt",
+    "load_extract_input",
+    "load_extract_input_from_payload",
+    "load_prompt_text",
+    "run_extract",
     "InMemoryMCPToolCaller",
     "InMemoryXBookmarkClient",
     "MCPToolCaller",

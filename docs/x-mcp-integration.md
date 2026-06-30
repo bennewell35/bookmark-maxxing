@@ -275,7 +275,7 @@ See:
 - The MCP bookmarks tool name is configurable (`X_MCP_BOOKMARKS_TOOL`) because X does not publish a stable name; the default may need adjustment, discoverable via `tools/list`.
 - Live MCP mode requires `xurl` to be installed and authenticated once (`xurl auth oauth2`).
 - Fixture payloads are intentionally small and public-safe.
-- Theme clustering and study-guide generation still happen through the framework prompts, not this client boundary.
+- The ingestion client is a normalizer: it emits a source map and does not invent themes or summaries. Theme clustering, summaries, and skill/article generation run through the framework prompts via `bookmark-maxxing extract` (compose-only by default, `--llm` to run a local OpenAI-compatible model such as Ollama).
 - Auth validation only checks that local configuration exists; it does not verify credentials.
 - Rate-limit handling currently stops on `429` and preserves parsed header metadata for callers.
 
@@ -287,6 +287,7 @@ Delivered:
 - official X MCP-native transport (`XMCPBookmarkClient` via `xurl mcp`)
 - pagination and rate-limit handling
 - bookmark deduplication
+- prompt-driven extraction (`bookmark-maxxing extract`): composes framework prompts from ingested bookmarks and optionally runs them through a local OSS LLM (`--llm`, OpenAI-compatible/Ollama) to produce themes, skills, and articles
 
 Planned:
 

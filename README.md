@@ -240,6 +240,36 @@ MCP mode notes:
 
 See [`docs/live-smoke-test.md`](docs/live-smoke-test.md) for a safe live read-only smoke test, and [`docs/x-mcp-integration.md`](docs/x-mcp-integration.md) for the full integration reference.
 
+### Turn bookmarks into skills: `extract`
+
+`ingest-x` produces a normalized **source map** (it does not invent themes or summaries). `bookmark-maxxing extract` is the next step: it takes that ingested JSON and runs one of the framework prompts (`prompts/`) against it, injecting your bookmarks (source-map table + structured JSON) into the prompt.
+
+By default it is **compose-only** — it emits a complete, copy-paste-ready prompt for any LLM/agent and calls no model:
+
+```bash
+bookmark-maxxing ingest-x --mcp --input tests/fixtures/x_mcp_bookmarks.json --format json > /tmp/bm.json
+bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills > /tmp/extract-skills.prompt.md
+```
+
+Prompts: `extract-skills` (default), `read-bookmarks`, `write-article`.
+
+Add `--llm` to actually run the prompt through a local open-source model and get real themes/skills back. It speaks the OpenAI-compatible `/chat/completions` API (stdlib only, no extra deps), defaulting to a local **[Ollama](https://ollama.com)** server:
+
+```bash
+# one-time: install Ollama and pull a small open model
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1            # or qwen2.5, llama3.2, etc.
+
+bookmark-maxxing extract --input /tmp/bm.json --prompt extract-skills --llm > /tmp/skills.md
+```
+
+`extract` notes:
+
+- Point it at any OpenAI-compatible server (llama.cpp, vLLM, LM Studio, OpenRouter) via `BOOKMARK_MAXXING_LLM_BASE_URL` + `BOOKMARK_MAXXING_LLM_MODEL` (and `BOOKMARK_MAXXING_LLM_API_KEY` for hosted ones); override the model inline with `--llm-model`.
+- If no LLM server is reachable, `--llm` exits cleanly with a clear message and emits nothing — it never fakes output.
+- The model only *reads* your already-ingested bookmarks; `extract` makes no calls to X and cannot mutate any source platform.
+- LLM output may reflect **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
+
 ## The Framework
 
 Bookmark Maxxing has six steps:
