@@ -158,6 +158,7 @@ Start with one source and one output.
 Adapters explain how to safely collect from specific sources.
 
 - [LinkedIn saved posts](docs/adapters/linkedin-saved-posts.md)
+- [X MCP integration](docs/x-mcp-integration.md)
 
 ## Roadmap
 
@@ -189,11 +190,19 @@ bookmark-maxxing/
   docs/
     adapters/
       linkedin-saved-posts.md
+    specs/
+      x-mcp-bookmark-ingestion.md
     framework.md
     quickstart.md
     publishing-playbook.md
+    x-mcp-integration.md
   recipes/
     linkedin-saves-to-skills.md
+  src/
+    bookmark_maxxing/
+      x_mcp.py
+  tests/
+    test_x_mcp.py
   prompts/
     read-bookmarks.md
     extract-skills.md
