@@ -137,6 +137,71 @@ This is not a news recap. It is a skill extraction system.
 5. Use [`templates/skill-card.md`](templates/skill-card.md) for each reusable skill.
 6. Use [`prompts/write-article.md`](prompts/write-article.md) and [`templates/article-template.md`](templates/article-template.md) to publish the weekly issue.
 
+## Try the X Bookmark CLI (v0.1)
+
+Bookmark Maxxing ships a small, read-only CLI that normalizes X bookmarks into a deterministic source map (Markdown or JSON). It runs fully offline against a local fixture by default and never writes to X.
+
+### What it does
+
+- Reads X-shaped bookmark records (from a local fixture, or an opt-in read-only live fetch).
+- Normalizes them into a consistent shape, preserving author and source attribution.
+- Validates and deduplicates them.
+- Emits a deterministic Markdown source map or JSON document you can feed into the framework prompts.
+
+### Install locally
+
+Requires Python 3.10+. No third-party dependencies.
+
+```bash
+git clone https://github.com/bennewell35/bookmark-maxxing.git
+cd bookmark-maxxing
+
+# Option A: run from source (no install)
+PYTHONPATH=src python3 -m bookmark_maxxing.cli --help
+
+# Option B: install the console script into a virtualenv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+bookmark-maxxing --help
+```
+
+### Run the fixture dry-run
+
+The default path is fixture-backed and local-only — safe to run anytime:
+
+```bash
+bookmark-maxxing ingest-x --dry-run --input tests/fixtures/x_bookmarks_pages.json --format json
+```
+
+Or, without installing:
+
+```bash
+PYTHONPATH=src python3 -m bookmark_maxxing.cli ingest-x \
+  --dry-run --input tests/fixtures/x_bookmarks_pages.json --format json
+```
+
+Use `--format markdown` for a ready-to-paste source map.
+
+### Optional: live read-only mode
+
+Live mode is strictly opt-in, read-only, and never enabled by default. It issues only `GET /2/users/{id}/bookmarks` and requires credentials supplied through local environment variables:
+
+```bash
+export X_API_USER_ID=...        # your numeric X user ID
+export X_API_BEARER_TOKEN=...   # user-context bearer token, kept local
+
+bookmark-maxxing ingest-x --live --format json --max-pages 1 > /tmp/my-bookmarks.json
+```
+
+Live mode rules:
+
+- Requires `X_API_USER_ID` and `X_API_BEARER_TOKEN` set locally. Never commit them.
+- Output may contain **private bookmark data** — write it to `/tmp` or stdout, never into the repo.
+- Do not commit generated output. `.gitignore` already excludes `.env`, `tmp/`, `raw/`, and `exports/private/`.
+
+See [`docs/live-smoke-test.md`](docs/live-smoke-test.md) for a safe live read-only smoke test, and [`docs/x-mcp-integration.md`](docs/x-mcp-integration.md) for the full integration reference.
+
 ## The Framework
 
 Bookmark Maxxing has six steps:
@@ -187,6 +252,9 @@ bookmark-maxxing/
   GOVERNANCE.md
   SECURITY.md
   SUPPORT.md
+  .github/
+    workflows/
+      ci.yml
   docs/
     adapters/
       linkedin-saved-posts.md
@@ -196,6 +264,8 @@ bookmark-maxxing/
     quickstart.md
     publishing-playbook.md
     x-mcp-integration.md
+    live-smoke-test.md
+    release-checklist.md
   recipes/
     linkedin-saves-to-skills.md
   src/
@@ -255,14 +325,15 @@ Long version:
 
 ## Status
 
-This repo is framework-first. It is intentionally not an app yet.
+This repo is framework-first, and now ships a small read-only CLI as its first working slice.
 
-The first useful version is:
+The current useful version is:
 
 - a clear method
 - reusable prompts
 - templates
 - weekly examples
 - source attribution
+- a read-only X bookmark CLI (fixture dry-run by default, opt-in live mode)
 
-If the workflow keeps proving useful, the next layer can be a CLI for normalizing exports from X, GitHub, Slack, newsletters, and browser bookmarks.
+The next layers extend the CLI to normalize exports from GitHub, Slack, newsletters, and browser bookmarks. See [`docs/release-checklist.md`](docs/release-checklist.md) for what remains before the v0.1.0 release.

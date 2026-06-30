@@ -386,6 +386,22 @@ class XBookmarkCLITests(unittest.TestCase):
         self.assertIn('"pages_fetched": 2', output.getvalue())
         self.assertIn('"author_username": "ben_ai_eng"', output.getvalue())
 
+    def test_dry_run_cli_output_is_deterministic(self):
+        for output_format in ("json", "markdown"):
+            first = io.StringIO()
+            second = io.StringIO()
+
+            cli_main(
+                ["ingest-x", "--dry-run", "--input", str(FIXTURE_PATH), "--format", output_format],
+                stdout=first,
+            )
+            cli_main(
+                ["ingest-x", "--dry-run", "--input", str(FIXTURE_PATH), "--format", output_format],
+                stdout=second,
+            )
+
+            self.assertEqual(first.getvalue(), second.getvalue())
+
     def test_dry_run_cli_requires_local_input(self):
         with self.assertRaises(SystemExit):
             cli_main(["ingest-x", "--format", "json"], stdout=io.StringIO())
