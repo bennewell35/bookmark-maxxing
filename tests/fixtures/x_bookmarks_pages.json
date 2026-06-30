@@ -1,0 +1,52 @@
+{
+  "pages": [
+    {
+      "headers": {
+        "x-rate-limit-limit": "15",
+        "x-rate-limit-remaining": "14",
+        "x-rate-limit-reset": "1782792000"
+      },
+      "items": [
+        {
+          "id": "1",
+          "text": "Bookmarks are the input. Skills are the output.",
+          "author": {
+            "username": "ben_ai_eng",
+            "name": "Ben Newell"
+          },
+          "created_at": "2026-06-28T16:41:08Z",
+          "theme": "bookmark maxxing"
+        },
+        {
+          "id": "2",
+          "text": "Design repeatable systems, not better prompts.",
+          "author_username": "systems_builder",
+          "author_name": "Systems Builder",
+          "url": "https://x.com/systems_builder/status/2",
+          "theme": "operating loops"
+        }
+      ],
+      "next_token": "page-2"
+    },
+    {
+      "headers": {
+        "x-rate-limit-limit": "15",
+        "x-rate-limit-remaining": "13",
+        "x-rate-limit-reset": "1782792000"
+      },
+      "items": [
+        {
+          "id": "3",
+          "text": "Source maps make learning artifacts auditable.",
+          "author_username": "source_mapper",
+          "author_name": "Source Mapper",
+          "url": "https://x.com/source_mapper/status/3",
+          "linked_urls": [
+            "https://example.com/source-map"
+          ],
+          "theme": "source attribution"
+        }
+      ]
+    }
+  ]
+}

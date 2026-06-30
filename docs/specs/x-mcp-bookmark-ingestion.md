@@ -43,6 +43,8 @@ Initial outputs:
 - validation errors
 - Markdown source maps
 - Markdown summaries
+- deterministic JSON dry-run output
+- pagination and rate-limit metadata
 
 Future outputs:
 
@@ -60,12 +62,15 @@ Future outputs:
 4. Add explicit TODOs where live MCP/API access is required.
 5. Add local tests for pure logic.
 6. Add live ingestion only after auth and environment variables are configured.
+7. Keep a fixture-backed dry-run CLI as the first runnable path.
 
 ## Environment Variables
 
 ```text
 X_MCP_SERVER_URL=https://api.x.com/mcp
 X_DOCS_MCP_SERVER_URL=https://docs.x.com/mcp
+X_API_BASE_URL=https://api.x.com/2
+X_API_USER_ID=
 X_API_BEARER_TOKEN=
 X_API_CLIENT_ID=
 X_API_CLIENT_SECRET=
@@ -82,3 +87,6 @@ REDIRECT_URI=http://localhost:8080/callback
 - Bookmark normalization preserves author attribution and source URL.
 - Markdown output is deterministic.
 - Live API integration remains behind explicit TODOs/configuration.
+- Dry-run CLI reads only local fixture files.
+- Ingestion rejects clients that expose obvious account mutation methods.
+- Direct live API transport uses only authenticated GET requests.
